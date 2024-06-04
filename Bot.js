@@ -1,14 +1,24 @@
 const { Telegraf } = require('telegraf')
 const axios = require('axios')
+require('dotenv').config()
 
 
 module.exports = class Bot {
-    constructor(botKey, defaultTokenList, updateTime) {
+    constructor(botKey, defaultTokenList, updateTime, allowedUserId) {
         this.bot = new Telegraf(botKey)
         this.defaultTokenList = defaultTokenList
         this.updateTime = updateTime
         this.sentMessages = {}
         this.channels = {}
+        this.allowedUserId = allowedUserId
+
+        this.bot.use((ctx, next) => {
+            if (ctx.from.id === this.allowedUserId) {
+                return next()
+            } else {
+                return ctx.reply('У вас нет прав на выполнение этой команды.')
+            }
+        })
     }
 
     async getPrice(currency) {
