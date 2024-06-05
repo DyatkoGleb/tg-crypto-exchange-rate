@@ -4,37 +4,46 @@ require('dotenv').config()
 
 
 module.exports = class Bot {
-    constructor(botKey, defaultTokenList, updateTime, allowedUserId) {
+    API_URL = 'https://min-api.cryptocompare.com/data/price'
+    ACCESS_ERROR = 'У вас нет прав на выполнение этой команды.'
+    API_CURRENCY_ERROR = 'Ошибка при получении цены'
+    SEND_TO_CHAT_ERROR = 'Ошибка при отправке сообщения в канал с ID'
+
+    constructor(botKey, defaultTokenList, updateTime, allowedUserId, utils) {
         this.bot = new Telegraf(botKey)
         this.defaultTokenList = defaultTokenList
         this.updateTime = updateTime
         this.sentMessages = {}
         this.channels = {}
         this.allowedUserId = allowedUserId
+        this.utils = utils
 
         this.bot.use((ctx, next) => {
             if (ctx.from.id === this.allowedUserId) {
                 return next()
             } else {
-                return ctx.reply('У вас нет прав на выполнение этой команды.')
+                return ctx.reply(this.ACCESS_ERROR)
             }
         })
     }
 
-    async getPrice(currency) {
+    getPrice = async (currency) => {
         try {
-            const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${currency}&tsyms=USD`)
+            const response = await axios.get(`${this.API_URL}?fsym=${currency}&tsyms=USD`)
             return response.data.USD
         } catch (error) {
-            console.error('Ошибка при получении цены:', error)
-            return 'Ошибка при получении цены'
+            console.error(`${this.API_CURRENCY_ERROR} :`, error)
+            return this.API_CURRENCY_ERROR
         }
     }
 
-    async createMessage(channelId) {
+    createMessage = async (channelId) => {
         let message = '📊\n'
+
         for (let ticker of this.channels[channelId]) {
-            const price = await this.getPrice(ticker)
+            let price = await this.getPrice(ticker)
+
+            price = price.toString().replace('.', '\\.')
 
             if (ticker === 'TONCOIN') {
                 ticker = 'TON'
@@ -42,34 +51,36 @@ module.exports = class Bot {
 
             message += `${ticker}: *$${price}* \n`
         }
+
         return message
     }
 
-    async sendMessageToChannels(message, channelId) {
+    sendMessageToChannels = async (message, channelId) => {
         try {
             const admins = await this.bot.telegram.getChatAdministrators(channelId)
 
             if (admins.some(admin => admin.user.id === this.bot.botInfo.id)) {
                 if (!this.sentMessages[channelId]) {
-                    const sentMessage = await this.bot.telegram.sendMessage(channelId, message, { parse_mode: 'Markdown' })
+                    const sentMessage = await this.sendMessageMd(channelId, message)
                     this.sentMessages[channelId] = sentMessage.message_id
                 } else {
                     const messageId = this.sentMessages[channelId]
-                    await this.bot.telegram.editMessageText(channelId, messageId, null, message, { parse_mode: 'Markdown' })
+                    await this.bot.telegram.editMessageText(channelId, messageId, null, message, { parse_mode: 'MarkdownV2' })
                 }
             }
         } catch (error) {
-            console.error(`Ошибка при отправке сообщения в канал с ID ${channelId}:`, error)
+            console.error(`${this.SEND_TO_CHAT_ERROR} ${channelId}:`, error)
         }
     }
 
-    async handleSendPrices() {
+    handleSendPrices = async () => {
         for (const channelId in this.channels) {
             let message = await this.createMessage(channelId)
             await this.sendMessageToChannels(message, channelId)
 
             setInterval(async () => {
                 const updatedMessage = await this.createMessage(channelId)
+
                 if (updatedMessage !== message) {
                     message = updatedMessage
                     await this.sendMessageToChannels(updatedMessage, channelId)
@@ -78,35 +89,47 @@ module.exports = class Bot {
         }
     }
 
-    handleAddCommand(ctx) {
-        const message = ctx.message.text.split(' ')
+    handleAddCommand = (ctx) => {
+        const command = ctx.message.text.split(' ')
+        const message = 'Ожидается сообщение следующего формата:\n'
+            + '`' + this.utils.escapeMarkdown('/add chatId ticker1 ticker2') + '`'
+            + '\n'
+            + 'Например:'
+            + '\n'
+            + this.utils.escapeMarkdown('/add -1002185580962 BTC ETH TONCOIN')
 
-        if (message.length === 1) {
-            return this.bot.telegram.sendMessage(ctx.message.chat.id, `
-                Ожидается сообщение следующего формата:\n\`/add chatId ticker1 ticker2\`\nНапример:\n\`/add -1002185580962 BTC ETH TONCOIN\`
-            `, { parse_mode: 'Markdown' })
+        if (command.length === 1) {
+            return this.sendMessageMd(ctx.message.chat.id, message)
         }
 
-        if (message.length === 2) {
-            this.channels[message[1]] = this.defaultTokenList
-        } else {
-            for (let i = 2; i < message.length; i++) {
-                if (!this.channels[message[1]]) {
-                    this.channels[message[1]] = [message[i]]
-                } else {
-                    this.channels[message[1]].push(message[i])
-                }
+        if (command.length === 2) {
+            return this.channels[command[1]] = this.defaultTokenList
+        }
+
+        for (let i = 2; i < command.length; i++) {
+            if (!this.channels[command[1]]) {
+                this.channels[command[1]] = [command[i]]
+            } else {
+                this.channels[command[1]].push(command[i])
             }
         }
     }
 
-    handleHelpCommand(ctx) {
-        this.bot.telegram.sendMessage(ctx.message.chat.id,
-            'Доступные команды:\n'
-            + '/add - Добавить канал (/add chatId ticker1 ticker2)\n'
-            + '/send_prices - Запустить отправку, перерисовку цен\n'
-            + '/help'
-        )
+    handleHelpCommand = (ctx) => {
+        let message = this.utils.escapeMarkdown('Доступные команды:\n')
+            + this.utils.escapeMarkdown('/add - Добавить канал (')
+            + '`'
+            + this.utils.escapeMarkdown('/add chatId ticker1 ticker2')
+            + '`'
+            + this.utils.escapeMarkdown(')\n')
+            + this.utils.escapeMarkdown('/send_prices - Запустить отправку, перерисовку цен\n')
+            + this.utils.escapeMarkdown('/help - Показать это сообщение\n')
+
+        this.sendMessageMd(ctx.message.chat.id, message)
+    }
+
+    sendMessageMd = (chatId, text) => {
+        return this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'MarkdownV2' })
     }
 
     start() {
