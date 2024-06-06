@@ -1,6 +1,6 @@
 {
   "name": "tg-crypto-exchange-rate",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Crypto currency tg bot",
   "main": "bot.js",
   "scripts": {
