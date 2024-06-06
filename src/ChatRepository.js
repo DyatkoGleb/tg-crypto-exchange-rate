@@ -2,7 +2,7 @@ const fs = require('fs').promises
 
 
 module.exports = class ChatRepository {
-    STORAGE_FILE_NAME = 'storage.json'
+    STORAGE_FILE_NAME = './src/storage.json'
 
     createFileIfNotExists = async () => {
         let fileHandle

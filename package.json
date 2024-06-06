@@ -1,15 +1,19 @@
 {
   "name": "tg-crypto-exchange-rate",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Crypto currency tg bot",
-  "main": "bot.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js"
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.3"
   },
   "author": "Dyatko Gleb <glebikon@yandex.ru>",
   "license": "MIT"

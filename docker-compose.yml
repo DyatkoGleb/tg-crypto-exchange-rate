@@ -1,0 +1,12 @@
+version: '3.9'
+
+services:
+  nodejs:
+    container_name: tg_crypto_exchange_rate
+    restart: always
+    build:
+      context: .
+    ports:
+      - "3003:3000"
+    volumes:
+      - .:/usr/src/app
