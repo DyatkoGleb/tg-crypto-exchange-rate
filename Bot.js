@@ -1,4 +1,3 @@
-const { Telegraf } = require('telegraf')
 const axios = require('axios')
 require('dotenv').config()
 
@@ -9,14 +8,14 @@ module.exports = class Bot {
     API_CURRENCY_ERROR = 'Ошибка при получении цены'
     SEND_TO_CHAT_ERROR = 'Ошибка при отправке сообщения в канал с ID'
 
-    constructor(botKey, defaultTokenList, updateTime, allowedUserId, utils) {
-        this.bot = new Telegraf(botKey)
+    constructor(bot, defaultTokenList, updateTime, allowedUserId, utils, chatRepository) {
+        this.bot = bot
         this.defaultTokenList = defaultTokenList
         this.updateTime = updateTime
-        this.sentMessages = {}
         this.channels = {}
         this.allowedUserId = allowedUserId
         this.utils = utils
+        this.chatRepository = chatRepository
 
         this.bot.use((ctx, next) => {
             if (ctx.from.id === this.allowedUserId) {
@@ -25,6 +24,10 @@ module.exports = class Bot {
                 return ctx.reply(this.ACCESS_ERROR)
             }
         })
+    }
+
+    fillChannels = async () => {
+        this.channels = await this.chatRepository.get()
     }
 
     getPrice = async (currency) => {
@@ -40,7 +43,8 @@ module.exports = class Bot {
     createMessage = async (channelId) => {
         let message = '📊\n'
 
-        for (let ticker of this.channels[channelId]) {
+        // TODO: собрать тикеры для всех чатов, чтробы для каждого не просить повторяющиеся
+        for (let ticker of this.channels[channelId]['tickers']) {
             let price = await this.getPrice(ticker)
 
             price = price.toString().replace('.', '\\.')
@@ -60,11 +64,12 @@ module.exports = class Bot {
             const admins = await this.bot.telegram.getChatAdministrators(channelId)
 
             if (admins.some(admin => admin.user.id === this.bot.botInfo.id)) {
-                if (!this.sentMessages[channelId]) {
+                if (!this.channels[channelId]['messageId']) {
                     const sentMessage = await this.sendMessageMd(channelId, message)
-                    this.sentMessages[channelId] = sentMessage.message_id
+                    this.channels[channelId]['messageId'] = sentMessage.message_id
+                    this.chatRepository.update(this.channels)
                 } else {
-                    const messageId = this.sentMessages[channelId]
+                    const messageId = this.channels[channelId]['messageId']
                     await this.bot.telegram.editMessageText(channelId, messageId, null, message, { parse_mode: 'MarkdownV2' })
                 }
             }
@@ -77,16 +82,21 @@ module.exports = class Bot {
         for (const channelId in this.channels) {
             let message = await this.createMessage(channelId)
             await this.sendMessageToChannels(message, channelId)
-
-            setInterval(async () => {
-                const updatedMessage = await this.createMessage(channelId)
-
-                if (updatedMessage !== message) {
-                    message = updatedMessage
-                    await this.sendMessageToChannels(updatedMessage, channelId)
-                }
-            }, this.updateTime)
         }
+
+        setInterval(async () => {
+            await this.fillChannels()
+
+            for (const channelId in this.channels) {
+                const message = await this.createMessage(channelId)
+
+                try {
+                    await this.sendMessageToChannels(message, channelId)
+                } catch ($err) {
+                    console.error($err)
+                }
+            }
+        }, this.updateTime)
     }
 
     handleAddCommand = (ctx) => {
@@ -103,16 +113,24 @@ module.exports = class Bot {
         }
 
         if (command.length === 2) {
-            return this.channels[command[1]] = this.defaultTokenList
-        }
+            this.channels[command[1]]['tickers'] = this.defaultTokenList
+        } else {
+            if (!this.channels?.[command[1]]?.tickers && !this.channels[command[1]]) {
+                this.channels[command[1]] = {}
+            }
 
-        for (let i = 2; i < command.length; i++) {
-            if (!this.channels[command[1]]) {
-                this.channels[command[1]] = [command[i]]
-            } else {
-                this.channels[command[1]].push(command[i])
+            this.channels[command[1]].tickers = []
+
+            for (let i = 2; i < command.length; i++) {
+                if (!this.channels[command[1]].tickers) {
+                    this.channels[command[1]].tickers = [command[i]]
+                } else {
+                    this.channels[command[1]].tickers.push(command[i])
+                }
             }
         }
+
+        this.chatRepository.update(this.channels)
     }
 
     handleHelpCommand = (ctx) => {
@@ -132,10 +150,15 @@ module.exports = class Bot {
         return this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'MarkdownV2' })
     }
 
-    start() {
+    start = async () => {
+        await this.chatRepository.createFileIfNotExists()
+        await this.fillChannels()
+
         this.bot.command('send_prices', () => this.handleSendPrices())
         this.bot.command('add', (ctx) => this.handleAddCommand(ctx))
         this.bot.command('help', (ctx) => this.handleHelpCommand(ctx))
         this.bot.launch()
+
+        console.log('The bot has been launched')
     }
 }
