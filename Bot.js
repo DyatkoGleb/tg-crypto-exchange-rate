@@ -3,19 +3,21 @@ require('dotenv').config()
 
 
 module.exports = class Bot {
-    API_URL = 'https://min-api.cryptocompare.com/data/price'
+    API_URL = 'https://min-api.cryptocompare.com/data/pricemulti'
     ACCESS_ERROR = 'У вас нет прав на выполнение этой команды.'
     API_CURRENCY_ERROR = 'Ошибка при получении цены'
     SEND_TO_CHAT_ERROR = 'Ошибка при отправке сообщения в канал с ID'
+    MAX_TICKER_LIST_LENGTH = 300
 
     constructor(bot, defaultTokenList, updateTime, allowedUserId, utils, chatRepository) {
-        this.bot = bot
         this.defaultTokenList = defaultTokenList
-        this.updateTime = updateTime
-        this.channels = {}
-        this.allowedUserId = allowedUserId
-        this.utils = utils
         this.chatRepository = chatRepository
+        this.allowedUserId = allowedUserId
+        this.updateTime = updateTime
+        this.utils = utils
+        this.bot = bot
+        this.currentPrices = {}
+        this.channels = {}
 
         this.bot.use((ctx, next) => {
             if (ctx.from.id === this.allowedUserId) {
@@ -30,24 +32,37 @@ module.exports = class Bot {
         this.channels = await this.chatRepository.get()
     }
 
-    getPrice = async (currency) => {
+    getUniqueChatTickers = () => {
+        const tickers = []
+
+        for (const channelId in this.channels) {
+            tickers.push(...this.channels[channelId].tickers)
+        }
+
+        return [...new Set(tickers)]
+    }
+
+    fillCurrentPrices = async () => {
+        const chunks = this.utils.chunkArray(this.getUniqueChatTickers(), this.MAX_TICKER_LIST_LENGTH)
+
         try {
-            const response = await axios.get(`${this.API_URL}?fsym=${currency}&tsyms=USD`)
-            return response.data.USD
+            for (const chunk of chunks) {
+                const response = await axios.get(`${this.API_URL}?fsyms=${chunk.join(',')}&tsyms=USD`)
+
+                for (let ticker in response.data) {
+                    this.currentPrices[ticker] = response.data[ticker].USD
+                }
+            }
         } catch (error) {
             console.error(`${this.API_CURRENCY_ERROR} :`, error)
-            return this.API_CURRENCY_ERROR
         }
     }
 
-    createMessage = async (channelId) => {
+    createMessage = (channelId) => {
         let message = '📊\n'
 
-        // TODO: собрать тикеры для всех чатов, чтробы для каждого не просить повторяющиеся
         for (let ticker of this.channels[channelId]['tickers']) {
-            let price = await this.getPrice(ticker)
-
-            price = price.toString().replace('.', '\\.')
+            const price = this.currentPrices[ticker].toString().replace('.', '\\.')
 
             if (ticker === 'TONCOIN') {
                 ticker = 'TON'
@@ -79,19 +94,19 @@ module.exports = class Bot {
     }
 
     handleSendPrices = async () => {
+        await this.fillCurrentPrices()
+
         for (const channelId in this.channels) {
-            let message = await this.createMessage(channelId)
-            await this.sendMessageToChannels(message, channelId)
+            await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
         }
 
         setInterval(async () => {
             await this.fillChannels()
+            await this.fillCurrentPrices()
 
             for (const channelId in this.channels) {
-                const message = await this.createMessage(channelId)
-
                 try {
-                    await this.sendMessageToChannels(message, channelId)
+                    await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
                 } catch ($err) {
                     console.error($err)
                 }
@@ -99,38 +114,46 @@ module.exports = class Bot {
         }, this.updateTime)
     }
 
+    fillChannelTicketsFromCommand = (command) => {
+        const chatId = command[1]
+
+        if (!this.channels?.[chatId]?.tickers && !this.channels[chatId]) {
+            this.channels[chatId] = {}
+        }
+
+        this.channels[chatId].tickers = []
+
+        for (let i = 2; i < command.length; i++) {
+            if (!this.channels[chatId].tickers) {
+                this.channels[chatId].tickers = [command[i]]
+            } else {
+                this.channels[chatId].tickers.push(command[i])
+            }
+        }
+
+        this.chatRepository.update(this.channels)
+    }
+
     handleAddCommand = (ctx) => {
         const command = ctx.message.text.split(' ')
-        const message = 'Ожидается сообщение следующего формата:\n'
-            + '`' + this.utils.escapeMarkdown('/add chatId ticker1 ticker2') + '`'
-            + '\n'
-            + 'Например:'
-            + '\n'
-            + this.utils.escapeMarkdown('/add -1002185580962 BTC ETH TONCOIN')
 
         if (command.length === 1) {
+            const message = 'Ожидается сообщение следующего формата:\n'
+                + '`' + this.utils.escapeMarkdown('/add chatId ticker1 ticker2') + '`'
+                + '\n'
+                + 'Например:'
+                + '\n'
+                + this.utils.escapeMarkdown('/add -1002185580962 BTC ETH TONCOIN')
+
             return this.sendMessageMd(ctx.message.chat.id, message)
         }
 
         if (command.length === 2) {
             this.channels[command[1]]['tickers'] = this.defaultTokenList
-        } else {
-            if (!this.channels?.[command[1]]?.tickers && !this.channels[command[1]]) {
-                this.channels[command[1]] = {}
-            }
-
-            this.channels[command[1]].tickers = []
-
-            for (let i = 2; i < command.length; i++) {
-                if (!this.channels[command[1]].tickers) {
-                    this.channels[command[1]].tickers = [command[i]]
-                } else {
-                    this.channels[command[1]].tickers.push(command[i])
-                }
-            }
+            return this.chatRepository.update(this.channels)
         }
 
-        this.chatRepository.update(this.channels)
+        this.fillChannelTicketsFromCommand(command)
     }
 
     handleHelpCommand = (ctx) => {
@@ -159,6 +182,6 @@ module.exports = class Bot {
         this.bot.command('help', (ctx) => this.handleHelpCommand(ctx))
         this.bot.launch()
 
-        console.log('The bot has been launched')
+        console.info('The bot has been launched')
     }
 }
