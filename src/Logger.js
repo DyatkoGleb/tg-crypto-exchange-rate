@@ -1,6 +1,6 @@
 module.exports = class Logger
 {
-    #LOG_DIR = './src/log/'
+    #LOG_DIR = './logs/'
 
     constructor(utils) {
         this.utils = utils

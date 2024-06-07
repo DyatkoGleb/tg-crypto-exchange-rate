@@ -84,7 +84,7 @@ module.exports = class Bot {
         try {
             const admins = await this.bot.telegram.getChatAdministrators(channelId)
 
-            if (!admins.includes(this.bot.botInfo.id)) {
+            if (!admins.some(admin => admin.user.id === this.bot.botInfo.id)) {
                 return
             }
 
