@@ -30,14 +30,14 @@ module.exports = class Utils
 
         fs.mkdir(dir, { recursive: true }, (err) => {
             if (err) {
-                console.error('Error creating directory', err)
-            } else {
-                fs.appendFile(filePath, data, 'utf8', (err) => {
-                    if (err) {
-                        console.error('Error writing to file', err)
-                    }
-                })
+                return console.error('Error creating directory', err)
             }
+
+            fs.appendFile(filePath, data, 'utf8', (err) => {
+                if (err) {
+                    console.error('Error writing to file', err)
+                }
+            })
         })
     }
 }

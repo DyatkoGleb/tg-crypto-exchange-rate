@@ -84,15 +84,17 @@ module.exports = class Bot {
         try {
             const admins = await this.bot.telegram.getChatAdministrators(channelId)
 
-            if (admins.some(admin => admin.user.id === this.bot.botInfo.id)) {
-                if (!this.channels[channelId]['messageId']) {
-                    const sentMessage = await this.sendMessageMd(channelId, message)
-                    this.channels[channelId]['messageId'] = sentMessage.message_id
-                    this.chatRepository.update(this.channels)
-                } else {
-                    const messageId = this.channels[channelId]['messageId']
-                    await this.bot.telegram.editMessageText(channelId, messageId, null, message, { parse_mode: 'MarkdownV2' })
-                }
+            if (!admins.includes(this.bot.botInfo.id)) {
+                return
+            }
+
+            if (!this.channels[channelId]['messageId']) {
+                const sentMessage = await this.sendMessageMd(channelId, message)
+                this.channels[channelId]['messageId'] = sentMessage.message_id
+                this.chatRepository.update(this.channels)
+            } else {
+                const messageId = this.channels[channelId]['messageId']
+                await this.bot.telegram.editMessageText(channelId, messageId, null, message, { parse_mode: 'MarkdownV2' })
             }
         } catch (error) {
             this.logger.error(`${this.SEND_TO_CHAT_ERROR} ${channelId}:`, error)
@@ -106,26 +108,28 @@ module.exports = class Bot {
             await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
         }
 
-        if (!this.sendingInProgress) {
-            this.sendingInProgress = true
-
-            setInterval(async () => {
-                if (!this.sendingInProgress) {
-                    this.sendingInProgress
-                }
-
-                await this.fillChannels()
-                await this.fillCurrentPrices()
-
-                for (const channelId in this.channels) {
-                    try {
-                        await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
-                    } catch ($err) {
-                        this.logger.error($err)
-                    }
-                }
-            }, this.updateTime)
+        if (this.sendingInProgress) {
+            return
         }
+
+        this.sendingInProgress = true
+
+        setInterval(async () => {
+            if (!this.sendingInProgress) {
+                this.sendingInProgress
+            }
+
+            await this.fillChannels()
+            await this.fillCurrentPrices()
+
+            for (const channelId in this.channels) {
+                try {
+                    await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
+                } catch ($err) {
+                    this.logger.error($err)
+                }
+            }
+        }, this.updateTime)
     }
 
     fillChannelTicketsFromCommand = (chatId, command) => {
@@ -150,9 +154,7 @@ module.exports = class Bot {
         if (command.length === 1) {
             const message = 'Ожидается сообщение следующего формата:\n'
                 + '`' + this.utils.escapeMarkdown('/add chatId ticker1 ticker2') + '`'
-                + '\n'
-                + 'Например:'
-                + '\n'
+                + '\nНапример:\n'
                 + this.utils.escapeMarkdown('/add -1002185580962 BTC ETH TONCOIN')
 
             return this.sendMessageMd(ctx.message.chat.id, message)
@@ -175,9 +177,7 @@ module.exports = class Bot {
     handleHelpCommand = (ctx) => {
         let message = this.utils.escapeMarkdown('Доступные команды:\n')
             + this.utils.escapeMarkdown('/add - Добавить канал (')
-            + '`'
-            + this.utils.escapeMarkdown('/add chatId ticker1 ticker2')
-            + '`'
+            + '`' + this.utils.escapeMarkdown('/add chatId ticker1 ticker2') + '`'
             + this.utils.escapeMarkdown(')\n')
             + this.utils.escapeMarkdown('/send_prices - Запустить отправку, перерисовку цен\n')
             + this.utils.escapeMarkdown('/help - Показать это сообщение\n')
