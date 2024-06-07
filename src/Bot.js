@@ -16,6 +16,7 @@ module.exports = class Bot {
         this.updateTime = updateTime
         this.utils = utils
         this.bot = bot
+        this.sendingInProgress = false
         this.currentPrices = {}
         this.channels = {}
 
@@ -32,18 +33,22 @@ module.exports = class Bot {
         this.channels = await this.chatRepository.get()
     }
 
-    getUniqueChatTickers = () => {
+    getUniqueChatTickers = (channelId) => {
         const tickers = []
 
-        for (const channelId in this.channels) {
+        if (channelId) {
             tickers.push(...this.channels[channelId].tickers)
+        } else {
+            for (const channelId in this.channels) {
+                tickers.push(...this.channels[channelId].tickers)
+            }
         }
 
         return [...new Set(tickers)]
     }
 
-    fillCurrentPrices = async () => {
-        const chunks = this.utils.chunkArray(this.getUniqueChatTickers(), this.MAX_TICKER_LIST_LENGTH)
+    fillCurrentPrices = async (channelId) => {
+        const chunks = this.utils.chunkArray(this.getUniqueChatTickers(channelId), this.MAX_TICKER_LIST_LENGTH)
 
         try {
             for (const chunk of chunks) {
@@ -100,23 +105,29 @@ module.exports = class Bot {
             await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
         }
 
-        setInterval(async () => {
-            await this.fillChannels()
-            await this.fillCurrentPrices()
+        if (!this.sendingInProgress) {
+            this.sendingInProgress = true
 
-            for (const channelId in this.channels) {
-                try {
-                    await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
-                } catch ($err) {
-                    console.error($err)
+            setInterval(async () => {
+                if (!this.sendingInProgress) {
+                    this.sendingInProgress
                 }
-            }
-        }, this.updateTime)
+
+                await this.fillChannels()
+                await this.fillCurrentPrices()
+
+                for (const channelId in this.channels) {
+                    try {
+                        await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
+                    } catch ($err) {
+                        console.error($err)
+                    }
+                }
+            }, this.updateTime)
+        }
     }
 
-    fillChannelTicketsFromCommand = (command) => {
-        const chatId = command[1]
-
+    fillChannelTicketsFromCommand = (chatId, command) => {
         if (!this.channels?.[chatId]?.tickers && !this.channels[chatId]) {
             this.channels[chatId] = {}
         }
@@ -130,11 +141,9 @@ module.exports = class Bot {
                 this.channels[chatId].tickers.push(command[i])
             }
         }
-
-        this.chatRepository.update(this.channels)
     }
 
-    handleAddCommand = (ctx) => {
+    handleAddCommand = async (ctx) => {
         const command = ctx.message.text.split(' ')
 
         if (command.length === 1) {
@@ -148,12 +157,18 @@ module.exports = class Bot {
             return this.sendMessageMd(ctx.message.chat.id, message)
         }
 
+        const chatId = command[1]
+
         if (command.length === 2) {
-            this.channels[command[1]]['tickers'] = this.defaultTokenList
-            return this.chatRepository.update(this.channels)
+            this.channels[chatId]['tickers'] = this.defaultTokenList
+        } else {
+            this.fillChannelTicketsFromCommand(chatId, command)
         }
 
-        this.fillChannelTicketsFromCommand(command)
+        this.chatRepository.update(this.channels)
+
+        await this.fillCurrentPrices(chatId)
+        await this.sendMessageToChannels(await this.createMessage(chatId), chatId)
     }
 
     handleHelpCommand = (ctx) => {
@@ -173,6 +188,21 @@ module.exports = class Bot {
         return this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'MarkdownV2' })
     }
 
+    startSendPricesIfTickersExist = () => {
+        let hasTickers = false
+
+        for (const key in this.channels) {
+            if (this.channels[key].hasOwnProperty('tickers')) {
+                hasTickers = true
+                break
+            }
+        }
+
+        if (hasTickers) {
+            this.handleSendPrices()
+        }
+    }
+
     start = async () => {
         await this.chatRepository.createFileIfNotExists()
         await this.fillChannels()
@@ -183,5 +213,7 @@ module.exports = class Bot {
         this.bot.launch()
 
         console.info('The bot has been launched')
+
+        this.startSendPricesIfTickersExist()
     }
 }
