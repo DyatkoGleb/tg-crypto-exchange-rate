@@ -7,13 +7,9 @@ Copy and configure env:
 ```bash
 cp .env.example .env
 ```
-Install dependencies:
-```bash
-npm i
-```
 Start application:
 ```bash
-npm start
+docker compose up -d
 ```
 
 ### How to use
