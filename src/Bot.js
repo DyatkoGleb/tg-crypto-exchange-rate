@@ -9,11 +9,12 @@ module.exports = class Bot {
     SEND_TO_CHAT_ERROR = 'Ошибка при отправке сообщения в канал с ID'
     MAX_TICKER_LIST_LENGTH = 300
 
-    constructor(bot, defaultTokenList, updateTime, allowedUserId, utils, chatRepository) {
+    constructor(bot, defaultTokenList, updateTime, allowedUserId, utils, chatRepository, logger) {
         this.defaultTokenList = defaultTokenList
         this.chatRepository = chatRepository
         this.allowedUserId = allowedUserId
         this.updateTime = updateTime
+        this.logger = logger
         this.utils = utils
         this.bot = bot
         this.sendingInProgress = false
@@ -59,7 +60,7 @@ module.exports = class Bot {
                 }
             }
         } catch (error) {
-            console.error(`${this.API_CURRENCY_ERROR} :`, error)
+            this.logger.error(`${this.API_CURRENCY_ERROR} :`, error)
         }
     }
 
@@ -94,7 +95,7 @@ module.exports = class Bot {
                 }
             }
         } catch (error) {
-            console.error(`${this.SEND_TO_CHAT_ERROR} ${channelId}:`, error)
+            this.logger.error(`${this.SEND_TO_CHAT_ERROR} ${channelId}:`, error)
         }
     }
 
@@ -120,7 +121,7 @@ module.exports = class Bot {
                     try {
                         await this.sendMessageToChannels(await this.createMessage(channelId), channelId)
                     } catch ($err) {
-                        console.error($err)
+                        this.logger.error($err)
                     }
                 }
             }, this.updateTime)
@@ -212,7 +213,7 @@ module.exports = class Bot {
         this.bot.command('help', (ctx) => this.handleHelpCommand(ctx))
         this.bot.launch()
 
-        console.info('The bot has been launched')
+        this.logger.info('The bot has been launched')
 
         this.startSendPricesIfTickersExist()
     }

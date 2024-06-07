@@ -4,6 +4,10 @@ const fs = require('fs').promises
 module.exports = class ChatRepository {
     STORAGE_FILE_NAME = './src/storage.json'
 
+    constructor(logger) {
+        this.logger = logger
+    }
+
     createFileIfNotExists = async () => {
         let fileHandle
 
@@ -12,7 +16,7 @@ module.exports = class ChatRepository {
             await fs.writeFile(this.STORAGE_FILE_NAME, JSON.stringify({}), 'utf8')
         } catch (err) {
             if (err.code !== 'EEXIST') {
-                console.error('Error creating file:', err)
+                this.logger.error('Error creating file:', err)
             }
         } finally {
             if (fileHandle) {
@@ -26,7 +30,7 @@ module.exports = class ChatRepository {
             const data = await fs.readFile(this.STORAGE_FILE_NAME, 'utf8')
             return JSON.parse(data)
         } catch (err) {
-            console.error('Error reading file:', err)
+            this.logger.error('Error reading file:', err)
             throw err
         }
     }
@@ -35,7 +39,7 @@ module.exports = class ChatRepository {
         try {
             await fs.writeFile(this.STORAGE_FILE_NAME, JSON.stringify(data, null, 2), 'utf8')
         } catch (err) {
-            console.error('Error writing to file:', err)
+            this.logger.error('Error writing to file:', err)
         }
     }
 }
